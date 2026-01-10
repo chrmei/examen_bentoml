@@ -1,0 +1,15 @@
+service: "src.service:AdmissionService"
+labels:
+  owner: "Christian Meister"
+  project: "Admissions Prediction"
+include:
+  - "src/**/*.py"
+  - ".env"
+python:
+  packages:
+    - scikit-learn
+    - pandas
+    - pyjwt
+    - python-dotenv
+docker:
+  dockerfile_template: "./Dockerfile.template"

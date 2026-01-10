@@ -1,4 +1,8 @@
 .DS_Store
 .DS_Store?
-/venv
+/.venv
+/.pytest_cache
 /clean_data.csv
+.env
+bento_image.tar
+**/__pycache__/**
