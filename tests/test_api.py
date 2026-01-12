@@ -1,15 +1,23 @@
 import pytest
 import requests
 import jwt
+import os
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
+from dotenv import load_dotenv
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
 
 BASE_URL = "http://localhost:3000"
-JWT_SECRET = "bentoml_exam_secret_key_2024"
-JWT_ALGORITHM = "HS256"
+JWT_SECRET = os.getenv("JWT_SECRET_KEY", "default_secret")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+API_USERNAME = os.getenv("API_USERNAME", "admin")
+API_PASSWORD = os.getenv("API_PASSWORD", "secret123")
 
 @pytest.fixture(scope="module")
 def valid_token():
-    response = requests.post(f"{BASE_URL}/login", json={"username": "admin", "password": "secret123"})
+    response = requests.post(f"{BASE_URL}/login", json={"username": API_USERNAME, "password": API_PASSWORD})
     return response.json().get("token")
 
 # JWT Authentication Tests
@@ -30,7 +38,7 @@ class TestJWTAuth:
 
     def test_expired_token_returns_401(self):
         expired_payload = {
-            "sub": "admin",
+            "sub": API_USERNAME,
             "exp": datetime.now(timezone.utc) - timedelta(hours=1),
             "iat": datetime.now(timezone.utc) - timedelta(hours=2)
         }
@@ -51,7 +59,7 @@ class TestJWTAuth:
 # Login API Tests
 class TestLoginAPI:
     def test_valid_credentials_return_token(self):
-        response = requests.post(f"{BASE_URL}/login", json={"username": "admin", "password": "secret123"})
+        response = requests.post(f"{BASE_URL}/login", json={"username": API_USERNAME, "password": API_PASSWORD})
         assert response.status_code == 200
         assert "token" in response.json()
 

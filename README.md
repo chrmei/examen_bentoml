@@ -13,6 +13,60 @@ A machine learning API service that predicts university admission chances using 
 | Docker Container | Complete |
 | Unit Tests | 9/9 Passing |
 
+## Workflow
+
+This section describes the complete workflow required to decompress, load, and test the containerized API. **All tests must return PASSED status.**
+
+### Step 1: Decompress the Archive
+
+If the project is delivered as a compressed archive (zip or tar), decompress it first:
+
+```bash
+# For tar.gz archive
+tar -xzf project.tar.gz
+
+# For zip archive
+unzip project.zip
+
+# For tar archive
+tar -xf project.tar
+```
+
+### Step 2: Load Docker Image
+
+Load the BentoML Docker image into your local Docker registry:
+
+```bash
+docker load -i bento_image.tar
+```
+
+### Step 3: Launch Containerized API
+
+Run the containerized API service:
+
+```bash
+docker run --rm -p 3000:3000 christianm_admission_service:latest
+```
+
+**Note:** Keep this terminal window open as the API will be running. Open a new terminal for the next step.
+
+### Step 4: Run Unit Tests
+
+In a new terminal window, install test dependencies and run the pytest tests:
+
+```bash
+# Install required test dependencies
+pip install pytest requests pyjwt python-dotenv
+
+# Run all tests with verbose output
+pytest tests/test_api.py -v
+```
+
+**Expected Result:** All 9 tests must return **PASSED** status. The test suite includes:
+- JWT authentication tests (4 tests)
+- Login API tests (2 tests)
+- Prediction API tests (3 tests)
+
 ## Architecture
 
 ```
@@ -45,27 +99,7 @@ A machine learning API service that predicts university admission chances using 
 └── bento_image.tar           # Exported Docker image
 ```
 
-## Quick Start
 
-### 1. Load Docker Image
-
-```bash
-docker load -i bento_image.tar
-```
-
-### 2. Run the Container
-
-```bash
-docker run --rm -p 3000:3000 christianm_admission_service:latest
-```
-
-### 3. Run Unit Tests
-
-```bash
-# Ensure container is running first
-pip install pytest requests pyjwt
-pytest tests/test_api.py -v
-```
 
 ## API Endpoints
 
