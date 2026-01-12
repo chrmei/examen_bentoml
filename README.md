@@ -10,8 +10,9 @@ A machine learning API service that predicts university admission chances using 
 | Model Training | Complete (R²: 0.82) |
 | JWT Authentication | Complete |
 | BentoML Service | Complete |
+| Batch Processing | Complete |
 | Docker Container | Complete |
-| Unit Tests | 9/9 Passing |
+| Unit Tests | 20+ Passing |
 
 ## Workflow
 
@@ -35,13 +36,29 @@ docker load -i bento_image.tar
 
 ### Step 3: Launch Containerized API
 
-Run the containerized API service:
+**Option A: Using Docker Compose (Recommended)**
+
+```bash
+docker-compose up
+```
+
+**Option B: Using Docker directly**
 
 ```bash
 docker run --rm -p 3000:3000 christianm_admission_service:latest
 ```
 
 **Note:** Keep this terminal window open as the API will be running. Open a new terminal for the next step.
+
+#### Docker Compose Configuration
+
+The `docker-compose.yml` file includes:
+- Port mapping: `3000:3000`
+- Environment variables from `.env` file
+- Healthcheck endpoint: `/healthz`
+- Automatic restart policy
+
+To customize environment variables, create a `.env` file or modify `docker-compose.yml`.
 
 ### Step 4: Run Unit Tests
 
@@ -52,27 +69,80 @@ In a new terminal window, install test dependencies and run the pytest tests:
 pip install pytest requests pyjwt python-dotenv
 
 # Run all tests with verbose output
-pytest tests/test_api.py -v
+pytest tests/test_endpoints.py -v
 ```
 
-**Expected Result:** All 9 tests must return **PASSED** status. The test suite includes:
+**Expected Result:** All tests must return **PASSED** status. The test suite includes:
 - JWT authentication tests (4 tests)
 - Login API tests (2 tests)
-- Prediction API tests (3 tests)
+- Single prediction API tests (3 tests)
+- Batch submission tests (5 tests)
+- Batch status tests (3 tests)
+- Batch results tests (5 tests)
+- Batch workflow tests (1 test)
 
 ## Architecture
 
 ```
-┌─────────────┐     ┌──────────────────┐     ┌──────────────────┐
-│   Client    │───▶│  BentoML Service │───▶│ Linear Regression│
-│  (HTTP)     │     │  (JWT Protected) │     │     Model        │
-└─────────────┘     └──────────────────┘     └──────────────────┘
+                    ┌─────────────┐
+                    │   Client    │
+                    │   (HTTP)    │
+                    └──────┬──────┘
                            │
-                    ┌──────┴──────┐
-                    │             │
-                  /login        /predict
-                 (public)      (protected)
+                    ┌──────▼──────────────────┐
+                    │   BentoML Service       │
+                    │   (JWT Protected)       │
+                    └──────┬──────────────────┘
+                           │
+        ┌──────────────────┼──────────────────┐
+        │                  │                  │
+   ┌────▼────┐       ┌─────▼─────┐      ┌─────▼──────────┐
+   │ /login  │       │ /predict  │      │  Batch API     │
+   │ (POST)  │       │  (POST)   │      │  (FastAPI)     │
+   │(public) │       │(protected)│      │(protected)     │
+   └─────────┘       └─────┬─────┘      └─────┬──────────┘
+                            │                  │
+                     ┌──────▼──────┐    ┌──────┼──────────────┐
+                     │  Runner 1   │    │      │              │
+                     │  (Single)  │    │  ┌───▼────────┐    │
+                     │             │    │  │/batch/     │    │
+                     │max_batch=1  │    │  │  submit    │    │
+                     │max_lat=100ms│    │  │  (POST)    │    │
+                     └─────────────┘    │  └────────────┘    │
+                                        │                    │
+                                        │  ┌──────────────┐ │
+                                        │  │/batch/status/│ │
+                                        │  │  {job_id}    │ │
+                                        │  │  (GET)       │ │
+                                        │  └──────────────┘ │
+                                        │                    │
+                                        │  ┌──────────────┐ │
+                                        │  │/batch/results/│ │
+                                        │  │  {job_id}    │ │
+                                        │  │  (GET)       │ │
+                                        │  └──────┬───────┘ │
+                                        │         │         │
+                                        │  ┌──────▼───────┐ │
+                                        │  │   Runner 2   │ │
+                                        │  │    (Batch)   │ │
+                                        │  │              │ │
+                                        │  │max_batch=100 │ │
+                                        │  │max_lat=1000ms│ │
+                                        │  └──────────────┘ │
+                                        └────────────────────┘
 ```
+
+### Dual-Runner Architecture
+
+The service uses two dedicated runners optimized for different use cases:
+
+- **Runner 1 (Single)**: Optimized for low-latency single predictions
+  - `max_batch_size=1` - Processes requests immediately
+  - `max_latency_ms=100` - Fast response time
+  
+- **Runner 2 (Batch)**: Optimized for high-throughput batch processing
+  - `max_batch_size=100` - Batches multiple requests
+  - `max_latency_ms=1000` - Allows batching window for efficiency
 
 ## Project Structure
 
@@ -83,10 +153,14 @@ pytest tests/test_api.py -v
 │   └── processed/
 ├── src/
 │   ├── auth/jwt_auth.py      # JWT middleware
+│   ├── models/
+│   │   ├── __init__.py       # Models package
+│   │   └── input_model.py    # Pydantic models
 │   ├── prepare_data.py       # Data preprocessing
 │   ├── train_model.py        # Model training
-│   └── service.py            # BentoML service
-├── tests/test_api.py         # Unit tests
+│   └── service_batch.py      # BentoML service with batch support
+├── tests/test_endpoints.py   # Comprehensive test suite
+├── docker-compose.yml        # Docker Compose configuration
 ├── bentofile.yaml            # BentoML config
 ├── Dockerfile.template       # Custom Docker template
 └── bento_image.tar           # Exported Docker image
@@ -133,6 +207,159 @@ Response:
 {"chance_of_admit": 0.958}
 ```
 
+### POST /batch/submit
+Submit a batch prediction job (requires JWT).
+
+```bash
+curl -X POST http://localhost:3000/batch/submit \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
+  -d '{
+    "inputs": [
+      {
+        "gre_score": 337,
+        "toefl_score": 118,
+        "university_rating": 4,
+        "sop": 4.5,
+        "lor": 4.5,
+        "cgpa": 9.65,
+        "research": 1
+      },
+      {
+        "gre_score": 320,
+        "toefl_score": 110,
+        "university_rating": 3,
+        "sop": 3.5,
+        "lor": 3.0,
+        "cgpa": 8.5,
+        "research": 0
+      }
+    ]
+  }'
+```
+
+Response:
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "pending",
+  "message": "Batch job submitted successfully"
+}
+```
+
+### GET /batch/status/{job_id}
+Check the status of a batch prediction job (requires JWT).
+
+```bash
+curl -X GET http://localhost:3000/batch/status/550e8400-e29b-41d4-a716-446655440000 \
+  -H "Authorization: Bearer <token>"
+```
+
+Response:
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "completed"
+}
+```
+
+Status values: `pending`, `processing`, `completed`, `failed`
+
+### GET /batch/results/{job_id}
+Retrieve batch prediction results (requires JWT).
+
+```bash
+curl -X GET http://localhost:3000/batch/results/550e8400-e29b-41d4-a716-446655440000 \
+  -H "Authorization: Bearer <token>"
+```
+
+Response (when completed):
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "completed",
+  "results": [
+    {"chance_of_admit": 0.958},
+    {"chance_of_admit": 0.782}
+  ],
+  "total": 2
+}
+```
+
+Response (when still processing):
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "processing",
+  "message": "Job is still processing"
+}
+```
+Status code: `202 Accepted`
+
+## Batch Workflow
+
+The batch prediction workflow follows an asynchronous pattern:
+
+1. **Submit Job**: POST to `/batch/submit` with a list of inputs
+   - Returns immediately with a `job_id`
+   - Job status is `pending`
+
+2. **Poll Status**: GET `/batch/status/{job_id}` to check progress
+   - Status transitions: `pending` → `processing` → `completed`
+   - Poll until status is `completed` (or `failed`)
+
+3. **Retrieve Results**: GET `/batch/results/{job_id}` when completed
+   - Returns all predictions if `completed`
+   - Returns `202 Accepted` if still processing
+
+### Example Python Workflow
+
+```python
+import requests
+import time
+
+BASE_URL = "http://localhost:3000"
+token = "your_jwt_token"
+headers = {"Authorization": f"Bearer {token}"}
+
+# Step 1: Submit batch job
+batch_data = {
+    "inputs": [
+        {"gre_score": 337, "toefl_score": 118, "university_rating": 4,
+         "sop": 4.5, "lor": 4.5, "cgpa": 9.65, "research": 1},
+        {"gre_score": 320, "toefl_score": 110, "university_rating": 3,
+         "sop": 3.5, "lor": 3.0, "cgpa": 8.5, "research": 0}
+    ]
+}
+
+response = requests.post(f"{BASE_URL}/batch/submit", json=batch_data, headers=headers)
+job_id = response.json()["job_id"]
+
+# Step 2: Poll status until completed
+max_attempts = 30
+for attempt in range(max_attempts):
+    status_response = requests.get(f"{BASE_URL}/batch/status/{job_id}", headers=headers)
+    status_data = status_response.json()
+    
+    if status_data["status"] == "completed":
+        break
+    elif status_data["status"] == "failed":
+        raise Exception(f"Job failed: {status_data}")
+    
+    time.sleep(1)
+
+# Step 3: Retrieve results
+results_response = requests.get(f"{BASE_URL}/batch/results/{job_id}", headers=headers)
+results = results_response.json()
+print(f"Received {results['total']} predictions")
+```
+
+### Batch Limits
+
+- Maximum batch size: **1000 records**
+- Empty batches are rejected
+- Large batches (>1000) return `400 Bad Request`
+
 ## Model Performance
 
 | Metric | Value |
@@ -178,13 +405,37 @@ python src/train_model.py
 ### Build & Containerize
 
 ```bash
+# Build the Bento
 bentoml build
+
+# Containerize the Bento
+bentoml containerize admission_service:latest -t admission_service:latest
+
+# Or use the custom tag
 bentoml containerize admission_service:latest -t christianm_admission_service:latest
+```
+
+### Docker Compose Deployment
+
+```bash
+# Start the service
+docker-compose up
+
+# Start in detached mode
+docker-compose up -d
+
+# Stop the service
+docker-compose down
+
+# View logs
+docker-compose logs -f
 ```
 
 ### Export Docker Image
 
 ```bash
+docker save -o bento_image.tar admission_service:latest
+# Or
 docker save -o bento_image.tar christianm_admission_service:latest
 ```
 

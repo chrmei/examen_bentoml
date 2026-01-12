@@ -1,4 +1,5 @@
-service: "src.service:AdmissionService"
+service: "src.service_batch:AdmissionService"
+description: "Admission Prediction Service with Batch Support"
 labels:
   owner: "Christian Meister"
   project: "Admissions Prediction"
@@ -7,9 +8,12 @@ include:
   - ".env"
 python:
   packages:
-    - scikit-learn
+    - numpy
     - pandas
+    - scikit-learn
     - pyjwt
     - python-dotenv
+    - pydantic
+    - fastapi
 docker:
   dockerfile_template: "./Dockerfile.template"
