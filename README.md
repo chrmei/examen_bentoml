@@ -22,14 +22,7 @@ This section describes the complete workflow required to decompress, load, and t
 If the project is delivered as a compressed archive (zip or tar), decompress it first:
 
 ```bash
-# For tar.gz archive
-tar -xzf project.tar.gz
-
-# For zip archive
-unzip project.zip
-
-# For tar archive
-tar -xf project.tar
+unzip exam_MEISTER.zip
 ```
 
 ### Step 2: Load Docker Image
